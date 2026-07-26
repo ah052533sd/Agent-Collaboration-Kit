@@ -7,7 +7,7 @@
 2. **协议漂移**——各仓库 `AGENTS.md` 里的硬约束是否还在。只查「不得 / 禁止 / 必须」
    这类有约束力的句子，不比对措辞：项目特化的表述本来就该不同。
 3. **协议逐行差异**——模板与各项目的协议节差异清单，交人判断是项目特化还是漏同步。
-4. **机制健康度**——近 7 天 journal 的信封 / 语义条目比例、每条平均长度。
+4. **机制健康度**——近 7 天 journal **按天**的信封 / 语义条目比例、每条平均长度。
    信封远多于语义条目说明有会话在空转却写了信封，或有人忘了写语义条目。
 
 只读、只报告，不改任何文件。
@@ -152,16 +152,34 @@ def check_diff(repos: list, max_lines: int = 24) -> list:
     return lines
 
 
-def check_health(repos: list, days: int = 7) -> list:
-    lines = [f"## 4. 机制健康度（近 {days} 天 journal）", ""]
+def check_health(repos: list, days: int = 7, recent: int = 1) -> list:
+    """按天摊开信封 / 语义比例，结论只看最近 `recent` 个有流水的日子。
+
+    把 7 天聚合成一个数字会让单个安装或调试日污染整周：实测装机当天堆出 37 条信封
+    对 8 条语义，此后一周每次检查都报同一个警，而次日实际只有 2 条信封。按天出数才
+    分得清「那天出过问题、已修」和「现在正在出问题」。
+
+    `recent` 默认 1——结论要回答的是「机制现在是否正常」，最新的有流水日就是最新证据。
+    取 2 天在流水只有两天时会把安装日本身圈进结论，等于没修。当天数据不完整只会让比例
+    偏低（信封还没攒够），是漏报而非误报，次日自动纠正；小样本另有 5 条信封的下限兜着。
+
+    更早的异常日留在明细里但不进结论——「那天是不是在装机或调协议」机械判定不了，
+    交人看。检查器的职责是把能机械判定的部分从人的眼睛里拿走，不是制造虚假确定性。
+    """
+    lines = [f"## 4. 机制健康度（近 {days} 天 journal，按天）", ""]
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     for repo in repos:
         files = sorted(p for p in (repo / "journal").glob("20??-??-??.md") if p.name[:10] >= cutoff)
-        env = sem = 0
+        lines += [f"### {repo.name}", ""]
+        if not files:
+            lines += [f"近 {days} 天没有流水文件。**结论：** 机制可能没在跑，或这段时间没开过会话。", ""]
+            continue
+        rows = []  # (日期, 语义数, 信封数, 是否异常)
         lengths = []
         for path in files:
             text = path.read_text(encoding="utf-8")
             matches = list(HEADING.finditer(text))
+            env = sem = 0
             for i, m in enumerate(matches):
                 end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
                 if "会话信封" in m.group("rest"):
@@ -169,14 +187,31 @@ def check_health(repos: list, days: int = 7) -> list:
                 else:
                     sem += 1
                     lengths.append(end - m.start())
+            # 信封少于 5 条时比例不稳——一天开两次会话就能触发，那是正常使用不是失效。
+            odd = env >= 5 and env > max(sem, 1) * 2
+            rows.append((path.name[:10], sem, env, odd))
+        for date, sem, env, odd in rows:
+            mark = f"  ⚠️ 信封是语义的 {env / max(sem, 1):.1f} 倍" if odd else ""
+            lines.append(f"- {date}：语义 {sem} 条 / 信封 {env} 条{mark}")
+        lines.append("")
+
+        recent_odd = [r[0] for r in rows[-recent:] if r[3]]
+        older_odd = [r[0] for r in rows[:-recent] if r[3]]
         avg = round(sum(lengths) / len(lengths)) if lengths else 0
-        flag = ""
-        if sem and env > sem * 2:
-            flag = "  ⚠️ 信封远多于语义条目：查空转判定，或有人只写信封不写判断"
-        if avg > 4000:
-            flag += "  ⚠️ 条目偏长：细节应进任务目录，此处只留判断和理由"
-        lines.append(f"- **{repo.name}**：{len(files)} 天 / 语义 {sem} 条 / 信封 {env} 条 / 语义条目均长 {avg} 字符{flag}")
-    lines.append("")
+        if recent_odd:
+            lines.append(
+                f"**结论：{'、'.join(recent_odd)} 异常**：查空转判定"
+                "（信封应只在会话真干过活时写），或有人只写信封不写判断。"
+            )
+        else:
+            lines.append(f"**结论：** 最近有流水的 {recent} 天（{rows[-1][0]}）正常。")
+        if older_odd:
+            lines.append(
+                f"更早的异常日：{'、'.join(older_odd)}——若那天在装机或调协议，属预期；否则查空转判定。"
+            )
+        lines.append(f"语义条目均长 {avg} 字符（{len(files)} 天合计）。"
+                     + ("  ⚠️ 条目偏长：细节应进任务目录，此处只留判断和理由" if avg > 4000 else ""))
+        lines.append("")
     return lines
 
 
