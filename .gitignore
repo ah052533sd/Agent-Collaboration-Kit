@@ -1,0 +1,9 @@
+# 本机配置：要检查哪些仓库。路径是本机信息，不跟着工具包分发。
+repos.local.txt
+
+# 周度复查报告：会引用消费方项目的 journal 内容（含业务信息），只留本地。
+reviews/
+
+.DS_Store
+__pycache__/
+*.pyc

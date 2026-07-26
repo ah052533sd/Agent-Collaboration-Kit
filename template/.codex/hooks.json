@@ -1,0 +1,41 @@
+{
+  "description": "Collaboration journal hooks for Codex.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/journal/bin/context.py\" --agent codex",
+            "timeout": 5,
+            "statusMessage": "读取未读协作流水…"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/journal/bin/context.py\" --agent codex",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/bin/python3 \"$(git rev-parse --show-toplevel)/journal/bin/end.py\" --agent codex",
+            "timeout": 3,
+            "statusMessage": "写入会话信封"
+          }
+        ]
+      }
+    ]
+  }
+}
