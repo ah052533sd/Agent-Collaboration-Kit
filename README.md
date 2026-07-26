@@ -12,6 +12,12 @@
 
 ## 三步装完
 
+0. 拿到工具包：
+
+   ```bash
+   git clone https://github.com/ah052533sd/Agent-Collaboration-Kit.git
+   ```
+
 1. 把整个文件夹放到目标仓库旁边（或直接放进仓库，装完删掉）。
 2. 在仓库里开 **Claude Code**，把 [`SETUP-CLAUDE.md`](SETUP-CLAUDE.md) 整份粘进去。它会装文件、写协议、跑六项验证。
 3. 在同一仓库开 **Codex**，把 [`SETUP-CODEX.md`](SETUP-CODEX.md) 整份粘进去。它会引导你完成 hook 信任审批，再跑八项验证。
