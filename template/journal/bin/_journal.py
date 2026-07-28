@@ -28,6 +28,10 @@ AGENTS = ("claude", "codex")
 HEADING = re.compile(r"(?m)^## \[(?P<agent>[^\]]+)\]\s*(?P<rest>.*)$")
 ENVELOPE_MARK = "会话信封"
 
+# 产物路径行：`- **产物：** `path``。降级注入时必须原样带上，见 entry_digest()。
+ARTIFACT_LABEL = "产物"
+ARTIFACT_LINE = re.compile(r"(?m)^- \*\*{}：\*\*.*$".format(ARTIFACT_LABEL))
+
 # 注入预算：单文件 6000 字符、最多 3 天。超出部分显式标注，提示主动补读。
 MAX_FILES = 3
 MAX_CHARS_PER_FILE = 6000
@@ -131,6 +135,26 @@ def journal_sections() -> list:
                 )
             )
     return sections
+
+
+def entry_title(body: str) -> str:
+    """条目标题行，去掉 markdown 的 `## `。"""
+    return (body.splitlines()[0] if body else "").lstrip("# ").strip()
+
+
+def artifact_lines(body: str) -> list:
+    return [m.group(0) for m in ARTIFACT_LINE.finditer(body)]
+
+
+def entry_digest(body: str) -> str:
+    """预算不够时保留的最小可定位单位：标题 + 产物路径。
+
+    只留标题不够——产物路径只写在正文里，一超预算就被丢掉，接手方只能按标题的语义
+    相似度猜是哪个文件，**猜错了还不报错**（实测：一天 28 条语义条目 30876 字符，
+    三条同主题条目 4295 字符全被压成三行标题，另一方据此定位到了错的产物）。
+    """
+    return "\n".join(["- {}".format(entry_title(body))]
+                     + ["  {}".format(line) for line in artifact_lines(body)])
 
 
 def unread_sections(agent: str) -> list:
@@ -251,10 +275,15 @@ def peek_command(agent_to_read: str) -> str:
 
 
 def append_command(agent: str, session_id: str = "") -> str:
+    """每轮提醒里的写入模板。`--artifact` 放进模板而不是只写进协议文档：
+
+    它是每轮都进上下文的机制提示，文档不是——能用机制保证的不靠文档提醒。
+    """
     session = ' --session-id "{}"'.format(session_id) if session_id else ""
     return (
         '/usr/bin/python3 "{}/append.py" --agent {}{} '
-        '--title "<标题>" --doing "<单一主目标>" --judgment "<关键判断>"'
+        '--title "<标题>" --doing "<单一主目标>" --judgment "<关键判断>" '
+        '--artifact "<产出或改写的文件路径>"'
     ).format(BIN_DIR, agent, session)
 
 

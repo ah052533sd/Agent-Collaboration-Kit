@@ -15,6 +15,47 @@ import sys
 import _journal as J
 
 
+def clipped(body: str, rel) -> str:
+    """单条就超预算时才截断：保留开头，末尾补回产物行，并显式标注截断。"""
+    if len(body) <= J.MAX_CHARS_PER_FILE:
+        return body
+    return "\n".join([
+        body[:J.MAX_CHARS_PER_FILE],
+        "",
+        "> ⚠️ 本条共 {} 字符，已截断；需要完整内容时补读 `{}`。".format(len(body), rel),
+        "",
+    ] + J.artifact_lines(body))
+
+
+def render_file_block(path, bodies: list) -> list:
+    """单个日文件：预算内的条目给全文，超预算的**整条丢掉**并留下标题与产物。
+
+    不按字符拦腰截断——那会把一条判断从句子中间切开，读的人分不清是没写完还是被切了；
+    且产物路径写在正文里，一截就没了，接手方只能按标题猜是哪个文件，猜错还不报错。
+    保留最新的若干条：接力方需要的是最近状态，不是当天最早那几条。
+    """
+    rel = path.relative_to(J.REPO_ROOT)
+    kept, budget = [], J.MAX_CHARS_PER_FILE
+    for body in reversed(bodies):
+        if kept and len(body) > budget:
+            break
+        budget -= len(body)
+        kept.append(body)
+    kept.reverse()
+    dropped = bodies[:len(bodies) - len(kept)]
+
+    lines = ["### {}".format(rel), ""]
+    if dropped:
+        lines += [
+            "> ⚠️ 该文件另有 {} 条较早未读条目未注入（共 {} 字符，超出单文件 {} 字符预算）。"
+            "标题与产物如下，需要正文时补读 `{}`：".format(
+                len(dropped), sum(len(b) for b in dropped), J.MAX_CHARS_PER_FILE, rel
+            ),
+            "",
+        ] + [J.entry_digest(b) for b in dropped] + [""]
+    return lines + ["\n\n".join(clipped(b, rel) for b in kept), ""]
+
+
 def render_unread(agent: str) -> list:
     lines = ["## 协作流水（过程记录，不具备规范效力）", ""]
     unread = J.unread_sections(agent)
@@ -35,18 +76,7 @@ def render_unread(agent: str) -> list:
         ]
 
     for path in selected:
-        body = "\n\n".join(grouped[path])
-        rel = path.relative_to(J.REPO_ROOT)
-        if len(body) > J.MAX_CHARS_PER_FILE:
-            half = J.MAX_CHARS_PER_FILE // 2
-            body = "\n".join([
-                body[:half],
-                "",
-                "> ⚠️ 此文件未读内容共 {} 字符，中间已截断；需要完整内容时补读 `{}`。".format(len(body), rel),
-                "",
-                body[-half:],
-            ])
-        lines += ["### {}".format(rel), "", body, ""]
+        lines += render_file_block(path, grouped[path])
     return lines
 
 
@@ -101,11 +131,9 @@ def render_midsession(agent: str, session_id: str, fresh: list) -> str:
         content = "\n\n".join(bodies)
     else:
         files = sorted({str(p.relative_to(J.REPO_ROOT)) for p, _ in fresh})
-        titles = "\n".join(
-            "- {}".format(b.splitlines()[0].lstrip("# ").strip()) for b in bodies
-        )
-        content = "{}\n\n> 共 {} 字符，超出本轮注入预算；需要内容时主动 Read `{}`。".format(
-            titles, total, "、".join(files)
+        digests = "\n".join(J.entry_digest(b) for b in bodies)
+        content = "{}\n\n> 共 {} 字符，超出本轮注入预算，上面只给了标题与产物；需要正文时主动 Read `{}`。".format(
+            digests, total, "、".join(files)
         )
 
     return "{}\n\n{}\n\n{}".format(header, content, render_reminder(agent, session_id))

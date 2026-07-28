@@ -60,6 +60,7 @@ HARD_CONSTRAINTS = [
     "第三份",
     "不得依赖私有记忆",
     "不得就地改本仓库的协议",
+    "--artifact",
 ]
 
 SCRIPTS = ["_journal.py", "append.py", "context.py", "end.py", "peek.py"]
