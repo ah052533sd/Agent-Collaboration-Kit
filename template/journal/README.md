@@ -34,7 +34,7 @@
 
 ## 怎么写
 
-一天一个文件：`journal/YYYY-MM-DD.md`。**两侧共用同一个写入入口**（flock 加锁，同时写不会互相截断）：
+一天一个文件：`journal/YYYY-MM-DD.md`。**所有 Agent 共用同一个写入入口**（flock 加锁，同时写不会互相截断）：
 
 ```bash
 /usr/bin/python3 journal/bin/append.py --agent claude \
@@ -63,36 +63,43 @@
 
 `## [agent] 会话信封 HH:MM TZ` 形式的条目由 SessionEnd hook 自动追加，压成单行，只记 HEAD、未提交改动和原始记录路径。它保证「会话发生过、原始记录在哪」可被另一方发现，**不携带语义**——语义部分必须由 Agent 在会话中自行追加，hook 代劳不了：SessionEnd 触发时会话已结束，取不到模型的总结。信封不进注入，也不算游标。
 
+**TRAE 不写信封**：它没有 SessionEnd hook，但它的 session memory 自动落盘且带语义摘要，「会话发生过、记录在哪」这件事已经由那个目录本身保证（见下「兜底通道」）。
+
 ## 读取规则
 
-会话开始时读取**比自己上次语义条目更新的条目**，不全读，也不重读自己写过的。两侧都已机械化，且共用同一份实现（只差 `--agent` 一个参数，行为不会两边漂移）：
+会话开始时读取**比自己上次语义条目更新的条目**，不全读，也不重读自己写过的。有 hook 的一侧已机械化，且共用同一份实现（只差 `--agent` 一个参数，行为不会各方漂移）：
 
-| | Claude | Codex |
-|---|---|---|
-| 读取（每会话一次） | [`.claude/settings.json`](../.claude/settings.json) `SessionStart` | [`.codex/hooks.json`](../.codex/hooks.json) `SessionStart` |
-| 义务提醒（每轮） | 同上，`UserPromptSubmit` 分支，约 330 字符 | 同上，`UserPromptSubmit` 分支，约 330 字符 |
-| 信封（会话结束） | 同上，`SessionEnd` → [`bin/end.py`](bin/end.py) | 同上，`SessionEnd` → [`bin/end.py`](bin/end.py) |
+| | Claude | Codex | TRAE |
+|---|---|---|---|
+| 读取（每会话一次） | [`.claude/settings.json`](../.claude/settings.json) `SessionStart` | [`.codex/hooks.json`](../.codex/hooks.json) `SessionStart` | **无 hook** |
+| 义务提醒（每轮） | 同上，`UserPromptSubmit` 分支，约 330 字符 | 同上，`UserPromptSubmit` 分支，约 330 字符 | **无 hook** |
+| 信封（会话结束） | 同上，`SessionEnd` → [`bin/end.py`](bin/end.py) | 同上，`SessionEnd` → [`bin/end.py`](bin/end.py) | **不写**（见「兜底通道」） |
 
-实现：[`bin/context.py`](bin/context.py)（读取侧）、[`bin/end.py`](bin/end.py)（信封）、[`bin/append.py`](bin/append.py)（语义条目）、[`bin/peek.py`](bin/peek.py)（兜底抽取）、[`bin/_journal.py`](bin/_journal.py)（共用逻辑）。**两侧共用一份实现是硬要求**：曾经两侧各写一份，半天内漂移出四个 bug（游标把信封当语义条目导致静默漏读、注入不过滤信封、空转判定按天失效、对方写 journal 触发本方写信封）。
+**TRAE 侧的机制缺口要看清楚。** 2026-07 实测 TRAE SOLO 不提供 lifecycle hook（应用包里搜不到任何 hook 事件名，项目级也没有 hook 配置入口）——**它日后支持了要回来改这张表**。后果是它停在**上下文规范**这一档，而另外两方在**机制强制**档：它不会被自动注入未读条目，也不会每轮收到写入提醒——**漏写 journal 时没有任何兜底，且不报错**。目前唯一的补偿是它的 session memory 自动落盘，另外两方能事后读到它干了什么。
 
-游标是**各自最后一条语义条目**（`[claude]` 认自己的 `[claude]` 条目，`[codex]` 认自己的），信封不算语义条目、也不进注入。因此注入量不随信封累积增长。
+实现：[`bin/context.py`](bin/context.py)（读取侧）、[`bin/end.py`](bin/end.py)（信封）、[`bin/append.py`](bin/append.py)（语义条目）、[`bin/peek.py`](bin/peek.py)（兜底抽取）、[`bin/_journal.py`](bin/_journal.py)（共用逻辑）。**所有 Agent 共用一份实现是硬要求**：曾经两侧各写一份，半天内漂移出四个 bug（游标把信封当语义条目导致静默漏读、注入不过滤信封、空转判定按天失效、对方写 journal 触发本方写信封）。
+
+游标是**各自最后一条语义条目**（`[claude]` 认自己的 `[claude]` 条目，其余各方同理），信封不算语义条目、也不进注入。因此注入量不随信封累积增长。这条也是整套读取逻辑能容纳第三方的原因——它比的是「我 vs 其他所有人」，不是「我 vs 另一个人」，加一方不需要改游标。
 
 **会话中途的追赶：** SessionStart 只在会话开始时跑一次，长会话里对方后写的条目本来看不到。因此每轮提醒的 hook 会顺带比对一次本会话水位（`.journal-state/<agent>/<session>.seen`）：对方有新条目就直接带进来，水位随之前移，**同一条不会重复注入**；自己写的条目和信封不带。超过 2000 字符时只给标题和补读指引。这**不是轮询**——不新增任何触发点，只是让本来每轮都跑的 hook 多做一次文件比对，实测每轮仍是 40–50ms。
 
 ## 冲突规则
 
-本层 append-only，天然低冲突：两方追加不同日期文件，或同一文件的不同时间段，几乎不会撞；同时写也有 flock 兜底。因此**本层写入不需要用户确认**。
+本层 append-only，天然低冲突：各方追加不同日期文件，或同一文件的不同时间段，几乎不会撞；同时写也有 flock 兜底。因此**本层写入不需要用户确认**。
 
 一旦出现真正的同段落冲突，仍按 [`AGENTS.md`](../AGENTS.md) 第 3 条（并发与冲突）处理：停下，把冲突双方原文报告给用户。
 
 ## 兜底通道：原始会话记录
 
-journal 是压缩，必然有损。以下位置保存两侧的完整原始会话记录，**实时落盘、明文可读**：
+journal 是压缩，必然有损。以下位置保存各方的会话记录，**实时落盘、明文可读**：
 
-| Agent | 位置 |
-|---|---|
-| Claude Code | `~/.claude/projects/<项目路径转写>/<session-id>.jsonl` |
-| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`（全局目录，按 `session_meta.cwd` 过滤本项目） |
+| Agent | 位置 | 内容 |
+|---|---|---|
+| Claude Code | `~/.claude/projects/<项目路径转写>/<session-id>.jsonl` | 原始对话 |
+| Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`（全局目录，按 `session_meta.cwd` 过滤本项目） | 原始对话 |
+| TRAE | `~/.trae-cn/memory/projects/<项目路径转写>/YYYYMMDD/session_memory_*.jsonl` | **已是结构化摘要**：intent / actions / outcome / learned |
+
+TRAE 那一列的差别不是小事：它落盘的已经是自己总结的摘要，所以**信息比会话信封更全，但也已经过一道模型的取舍**——引用时按「对方的过程记录」对待，不能当原话复核。项目路径转写规则与 Claude 一致（非字母数字逐个换成 `-`），实测已验证。
 
 **只在两种情况下读取**：journal 缺失（会话崩溃或未及时追加），或需要复核对方某个判断的原始上下文。不要例行全读——量大、噪音多，且混着被否决的路径，分不清哪句是结论。
 
@@ -101,13 +108,14 @@ journal 是压缩，必然有损。以下位置保存两侧的完整原始会话
 ```bash
 /usr/bin/python3 journal/bin/peek.py --agent codex            # 对方近 24h 记录（已按本项目过滤）
 /usr/bin/python3 journal/bin/peek.py --agent claude
+/usr/bin/python3 journal/bin/peek.py --agent trae
 /usr/bin/python3 journal/bin/peek.py --agent codex <jsonl 路径>
 /usr/bin/python3 journal/bin/peek.py --agent codex --full     # 单条上限放宽到 100000 字符
 ```
 
-它只抽 user / assistant 消息，丢掉 tool call、tool output、reasoning 和环境注入。压缩比随样本差别很大，三个实测点：135 MB → 51 KB（0.04%）、881 KB → 4.3 KB（0.5%）、449 KB → 4.8 KB（1.1%）。
+它只抽 user / assistant 消息，丢掉 tool call、tool output、reasoning 和环境注入。压缩比随样本差别很大，三个实测点：135 MB → 51 KB（0.04%）、881 KB → 4.3 KB（0.5%）、449 KB → 4.8 KB（1.1%）。TRAE 是例外——源文件本就是 KB 级摘要，抽取只是统一成同一种可读格式。
 
-这两个位置不在版本控制内，换设备即失效。跨设备场景下只有 journal 和知识层可靠。
+这些位置都不在版本控制内，换设备即失效。跨设备场景下只有 journal 和知识层可靠。
 
 ## 成本控制
 

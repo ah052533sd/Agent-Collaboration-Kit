@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 本项目的协作规范以 [`AGENTS.md`](AGENTS.md) 为唯一真相源（single source of truth）。
-Claude 与 Codex 共用同一套规则。**不要在本文件中复制、改写或补充 AGENTS.md 的内容**——
+所有协作的 Agent 共用同一套规则。**不要在本文件中复制、改写或补充 AGENTS.md 的内容**——
 需要调整规范时改 `AGENTS.md`，本文件只保留指针。
 
 @AGENTS.md

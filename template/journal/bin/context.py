@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""SessionStart / UserPromptSubmit hook：协作流水的**读取侧**（Claude 与 Codex 共用）。
+"""SessionStart / UserPromptSubmit hook：协作流水的**读取侧**（有 hook 的各方共用）。
 
 SessionStart   注入「比自己上次语义条目更新」的条目，给出对方原始记录的位置，
                并记录本会话起始 HEAD（供 SessionEnd 判断是否空转）。
 UserPromptSubmit 每轮注入一句极短提醒（约 300 字符），把 journal 义务留在上下文里。
 
 用法：/usr/bin/python3 journal/bin/context.py --agent claude|codex   （hook 输入走 stdin）
+
+TRAE 不在这里：它没有 lifecycle hook，本脚本靠 hook 的 stdin 取事件名和 session id，
+直接跑会什么都不输出。它的读取路径另行解决，不要在这里加 `trae` 假装能用。
 """
 from __future__ import annotations
 
@@ -81,18 +84,23 @@ def render_unread(agent: str) -> list:
 
 
 def render_fallback(agent: str) -> list:
-    """兜底通道：只给路径，不给内容；读取必须走抽取脚本。"""
-    peer = J.other_agent(agent)
-    records = J.codex_rollouts() if peer == "codex" else J.claude_transcripts()
-    if not records:
-        return []
-    return [
-        "## {} 近 24h 原始会话记录（兜底通道，本项目）".format(peer.capitalize()),
-        "",
-        "仅在 journal 缺失或需复核对方判断的原始上下文时读取。**禁止对 jsonl 用 Read / cat**"
-        "（单个常 0.5–1MB），一律用：`{}`。".format(J.peek_command(peer)),
-        "",
-    ] + [str(J.display_path(str(p))) for p in records] + [""]
+    """兜底通道：只给路径，不给内容；读取必须走抽取脚本。
+
+    **其余每一方都要渲染**：漏掉一方，它的会话记录对本次会话就等于不存在，而且不报错。
+    """
+    lines = []
+    for peer in J.other_agents(agent):
+        records = J.records_for(peer)
+        if not records:
+            continue
+        lines += [
+            "## {} 近 24h 会话记录（兜底通道，本项目）".format(peer.capitalize()),
+            "",
+            "仅在 journal 缺失或需复核对方判断的原始上下文时读取。**禁止对 jsonl 用 "
+            "Read / cat**（单个可达百 MB），一律用：`{}`。".format(J.peek_command(peer)),
+            "",
+        ] + [str(J.display_path(str(p))) for p in records] + [""]
+    return lines
 
 
 def render_obligation(agent: str, session_id: str) -> list:

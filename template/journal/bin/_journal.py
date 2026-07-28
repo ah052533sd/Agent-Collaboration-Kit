@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""协作流水（Collaboration Journal）共用逻辑：Claude 与 Codex 共用同一份实现。
+"""协作流水（Collaboration Journal）共用逻辑：所有 Agent 共用同一份实现。
 
-两侧的差别只有 `--agent` 一个参数——读取游标认自己的语义条目，兜底通道指向对方的
-原始会话记录。行为变更只改这里，两边不会漂移。
+各方的差别只有 `--agent` 一个参数——读取游标认自己的语义条目，兜底通道指向其余各方的
+会话记录。行为变更只改这里，各方不会漂移。
 
 设计约束见 `journal/README.md`「成本控制」。
 """
@@ -22,7 +22,7 @@ JOURNAL_DIR = REPO_ROOT / "journal"
 BIN_DIR = JOURNAL_DIR / "bin"
 STATE_DIR = REPO_ROOT / ".journal-state"
 
-AGENTS = ("claude", "codex")
+AGENTS = ("claude", "codex", "trae")
 
 # 条目标题：`## [agent] 14:30 PDT — 标题` 或 `## [agent] 会话信封 14:30 PDT`
 HEADING = re.compile(r"(?m)^## \[(?P<agent>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -40,8 +40,13 @@ MAX_CHARS_PER_FILE = 6000
 # ---------------------------------------------------------------- 基础工具
 
 
-def other_agent(agent: str) -> str:
-    return "codex" if agent == "claude" else "claude"
+def other_agents(agent: str) -> tuple:
+    """除自己以外的**所有** Agent。
+
+    返回元组而不是单个值：协作方不止两个时，「对方 = 另一个」会静默只渲染其中一方的
+    兜底通道，另一方的存在就此消失且不报错。
+    """
+    return tuple(a for a in AGENTS if a != agent)
 
 
 def now() -> datetime:
@@ -93,7 +98,7 @@ def display_path(raw: str) -> str:
 
 
 def append_locked(path: Path, content: str, day: str, marker: str = "") -> None:
-    """flock 追加：两侧同时结束会话时不会互相截断。marker 非空时做幂等去重。"""
+    """flock 追加：多方同时结束会话时不会互相截断。marker 非空时做幂等去重。"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -218,10 +223,13 @@ def wrote_semantics_this_session(agent, session_id, day_text, since=None):
 # ------------------------------------------------------- 兜底通道：原始记录
 
 
+def project_slug() -> str:
+    """项目路径转写：非字母数字字符逐个替换为 `-`。Claude 与 TRAE 实测是同一套规则。"""
+    return "".join(c if c.isalnum() else "-" for c in str(REPO_ROOT))
+
+
 def claude_transcript_dir() -> Path:
-    """Claude Code 按项目路径存记录，非字母数字字符逐个替换为 `-`。"""
-    slug = "".join(c if c.isalnum() else "-" for c in str(REPO_ROOT))
-    return Path.home() / ".claude" / "projects" / slug
+    return Path.home() / ".claude" / "projects" / project_slug()
 
 
 def claude_transcripts(days: int = 1, limit: int = 5) -> list:
@@ -267,6 +275,40 @@ def rollout_cwd(path: Path) -> str:
     except (json.JSONDecodeError, ValueError, AttributeError):
         return ""
     return str(payload.get("cwd", "")) if isinstance(payload, dict) else ""
+
+
+def trae_memories(days: int = 1, limit: int = 5) -> list:
+    """TRAE 的会话记忆：`~/.trae-cn/memory/projects/<slug>/YYYYMMDD/session_memory_*.jsonl`。
+
+    与另一批「原始对话」记录不同，这里落盘的**已经是结构化摘要**（intent / actions /
+    outcome / learned）——所以 TRAE 侧不写会话信封：信封只保证「会话发生过、记录在
+    哪」，这个目录本身就已经做到，还多带了语义。
+    """
+    directory = Path.home() / ".trae-cn" / "memory" / "projects" / project_slug()
+    if not directory.is_dir():
+        return []
+    cutoff = (now() - timedelta(days=days)).timestamp()
+    found = []
+    for path in directory.rglob("*.jsonl"):
+        try:
+            if path.stat().st_mtime >= cutoff:
+                found.append(path)
+        except OSError:
+            continue
+    return sorted(found, key=lambda p: p.stat().st_mtime)[-limit:]
+
+
+def records_for(agent: str, days: int = 1, limit: int = 5, this_project_only: bool = True) -> list:
+    """按 agent 分派到各自的记录目录。
+
+    渲染侧（`context.py`）和读取侧（`peek.py`）共用这一份分派——各写一份 if/else
+    就是漂移的开始，而且漏掉一个分支时会静默落到 else，读成另一个 Agent 的记录。
+    """
+    if agent == "codex":
+        return codex_rollouts(days, limit, this_project_only)
+    if agent == "trae":
+        return trae_memories(days, limit)
+    return claude_transcripts(days, limit)
 
 
 def peek_command(agent_to_read: str) -> str:

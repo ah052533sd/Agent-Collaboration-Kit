@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""向协作流水追加一条**语义条目**（Claude 与 Codex 共用）。
+"""向协作流水追加一条**语义条目**（所有 Agent 共用）。
 
-这是两侧写 journal 的唯一入口：flock 加锁、自动建当日文件、格式统一，
-两个 Agent 同时写也不会互相截断。
+这是各方写 journal 的唯一入口：flock 加锁、自动建当日文件、格式统一，
+多个 Agent 同时写也不会互相截断。没有 hook 的一方（如 TRAE）照样能直接跑本脚本——
+它不依赖 hook 输入，只要能执行命令就能写。
 
 用法（`--session-id` 请尽量带上：`end.py` 靠它精确判断本次会话是否空转）：
   /usr/bin/python3 journal/bin/append.py --agent claude \\

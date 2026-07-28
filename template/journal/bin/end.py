@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SessionEnd hook：协作流水的**写入侧机械部分**（Claude 与 Codex 共用）。
+"""SessionEnd hook：协作流水的**写入侧机械部分**（有 hook 的各方共用）。
 
 只追加一条**单行**会话信封：HEAD、未提交路径、原始记录位置。它的唯一作用是让另一
 Agent 能发现「这里发生过一个会话，原始记录在哪」。
@@ -11,6 +11,9 @@ Agent 能发现「这里发生过一个会话，原始记录在哪」。
 hook 代劳不了：SessionEnd 触发时会话已结束，取不到模型的总结。
 
 用法：/usr/bin/python3 journal/bin/end.py --agent claude|codex   （hook 输入走 stdin）
+
+TRAE 不写信封：它没有 SessionEnd hook，而它的 session memory 自动落盘且带语义摘要，
+「会话发生过、记录在哪」已由那个目录保证——再补一条单行信封是重复。
 """
 from __future__ import annotations
 

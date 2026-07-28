@@ -4,9 +4,13 @@
 丢掉 tool call、tool output 和 reasoning（这三类占绝大部分体积）。单个 jsonl 常在
 0.5–1MB，直接 Read / cat 一次就吃掉十几万 token；抽取后通常只剩 1%–5%。
 
+TRAE 是例外：它落盘的本来就是结构化摘要（intent / actions / outcome / learned），
+体积在 KB 级，抽取只是统一成同一种可读格式。
+
 用法：
   /usr/bin/python3 journal/bin/peek.py --agent codex           # 对方近 24h 记录（限本项目）
   /usr/bin/python3 journal/bin/peek.py --agent claude
+  /usr/bin/python3 journal/bin/peek.py --agent trae
   /usr/bin/python3 journal/bin/peek.py --agent codex <jsonl 路径> ...
   /usr/bin/python3 journal/bin/peek.py --agent codex --full    # 不截断单条消息
   /usr/bin/python3 journal/bin/peek.py --agent codex --days 3 --all-projects
@@ -32,6 +36,8 @@ NOISE_PREFIXES = (
     "<system-reminder",
     "<recommended_plugins",
 )
+# TRAE 的 session memory 字段，按可读顺序展开。
+TRAE_FIELDS = (("intent", "目标"), ("actions", "动作"), ("outcome", "结果"), ("learned", "结论"))
 
 
 def clean(text: str) -> str:
@@ -79,6 +85,19 @@ def extract_line(line: str, include_sidechain: bool):
         message = data.get("message") or {}
         return kind, blocks_text(message.get("content"))
 
+    # TRAE：{"intent":…,"actions":[…],"outcome":…,"learned":[…],"message_summary_time":…}
+    # 没有 role——落盘的已经是摘要而非对话。标为 memory，让读的人知道这是 TRAE 自己
+    # 总结的，不是原话；两个键一起判据，避免误吞另外两方的行。
+    if "intent" in data and "message_summary_time" in data:
+        parts = []
+        for key, label in TRAE_FIELDS:
+            value = data.get(key)
+            if isinstance(value, list):
+                value = "；".join(str(v) for v in value if v)
+            if value:
+                parts.append("{}: {}".format(label, value))
+        return "memory", " ｜ ".join(parts)
+
     return None
 
 
@@ -120,10 +139,10 @@ def main() -> int:
         missing = [str(p) for p in args.paths if not p.is_file()]
         for path in missing:
             print("（跳过不存在的路径：{}）".format(path), file=sys.stderr)
-    elif args.agent == "codex":
-        targets = J.codex_rollouts(args.days, args.limit, not args.all_projects)
     else:
-        targets = J.claude_transcripts(args.days, args.limit)
+        # 分派共用 `_journal.records_for`：这里再写一遍 if/else，漏掉一个分支就会静默
+        # 落到兜底分支去读另一个 Agent 的记录。
+        targets = J.records_for(args.agent, args.days, args.limit, not args.all_projects)
 
     if not targets:
         print("近 {} 天没有本项目的 {} 会话记录。".format(args.days, args.agent))
