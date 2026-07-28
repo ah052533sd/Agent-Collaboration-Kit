@@ -5,10 +5,13 @@ SessionStart   注入「比自己上次语义条目更新」的条目，给出�
                并记录本会话起始 HEAD（供 SessionEnd 判断是否空转）。
 UserPromptSubmit 每轮注入一句极短提醒（约 300 字符），把 journal 义务留在上下文里。
 
-用法：/usr/bin/python3 journal/bin/context.py --agent claude|codex   （hook 输入走 stdin）
+用法：
+  /usr/bin/python3 journal/bin/context.py --agent claude|codex          （hook 输入走 stdin）
+  /usr/bin/python3 journal/bin/context.py --agent trae --manual         （没有 hook 的一方）
 
-TRAE 不在这里：它没有 lifecycle hook，本脚本靠 hook 的 stdin 取事件名和 session id，
-直接跑会什么都不输出。它的读取路径另行解决，不要在这里加 `trae` 假装能用。
+`--manual` 是给没有 lifecycle hook 的 Agent（如 TRAE）用的：本脚本默认靠 hook 的 stdin
+取事件名和 session id，直接跑什么都不输出——加 `--manual` 才会把未读条目打到 stdout。
+它替代不了 hook（要靠 Agent 自己记得在会话开始跑一次），但让「读得到」这件事有个入口。
 """
 from __future__ import annotations
 
@@ -103,7 +106,13 @@ def render_fallback(agent: str) -> list:
     return lines
 
 
-def render_obligation(agent: str, session_id: str) -> list:
+def render_obligation(agent: str, session_id: str, manual: bool = False) -> list:
+    tail = (
+        "你这一侧没有 hook：以上内容不会自动出现，**每次会话开始要自己跑一次上面那条读取命令**；"
+        "写入也不会有每轮提醒，判断一形成就立刻追加，否则另一方永远看不到，且不报错。"
+        if manual else
+        "SessionEnd 只自动写 HEAD / 未提交改动 / 记录路径，不会替你生成语义摘要。"
+    )
     return [
         "## 本会话 journal 义务",
         "",
@@ -111,8 +120,7 @@ def render_obligation(agent: str, session_id: str) -> list:
         "",
         "`{}`".format(J.append_command(agent, session_id)),
         "",
-        "半成品、未验证判断进 journal，不进 `knowledge/`；写 `knowledge/` 仍需用户明确确认。"
-        "SessionEnd 只自动写 HEAD / 未提交改动 / 记录路径，不会替你生成语义摘要。",
+        "半成品、未验证判断进 journal，不进 `knowledge/`；写 `knowledge/` 仍需用户明确确认。" + tail,
     ]
 
 
@@ -150,7 +158,19 @@ def render_midsession(agent: str, session_id: str, fresh: list) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", required=True, choices=J.AGENTS)
+    parser.add_argument("--manual", action="store_true",
+                        help="不走 hook，直接把未读条目打到 stdout；没有 lifecycle hook 的一方"
+                             "（如 TRAE）在每次会话开始时自己跑")
     args = parser.parse_args()
+
+    if args.manual:
+        # 没有 session id：水位和起始 HEAD 都不记——前者服务「会话中途追赶」，后者服务
+        # 「信封空转判定」，没有 hook 的一方两样都用不上。游标不受影响：它认的是「自己
+        # 最后一条语义条目」，只要用 append.py 写过就自动前移，不需要额外状态。
+        print("\n".join(render_unread(args.agent)
+                        + render_fallback(args.agent)
+                        + render_obligation(args.agent, "", manual=True)))
+        return 0
 
     data = J.read_hook_input()
     event = str(data.get("hook_event_name", ""))
