@@ -58,8 +58,11 @@ ls journal/bin/ AGENTS.md 2>&1
 
 规则文件是你唯一的常驻上下文——另外两方靠 hook，你靠它。
 
-**问题在于 TRAE 加载规则文件的确切路径尚未实测确认。** 已知的两个候选写法：
-`.trae/rules/project_rules.md` 和 `.trae/project_rules.md`。所以这一步要做一次实测：
+**已实测确认的路径是 `.trae/rules/project_rules.md`**（TRAE SOLO CN，2026-07；同时试过
+`.trae/project_rules.md`，不生效）。直接装到这个路径即可。
+
+**但换了 TRAE 版本就未必成立**——它是产品行为，不是标准。装完如果发现规则明显没被遵守，
+按下面这个流程重测一次，不要凭猜测调整：
 
 1. 把 `template/.trae/rules/project_rules.md` 的内容分别写到**两个**路径；
 2. 在两份文件的最开头各加一行**不同的**标记，例如：

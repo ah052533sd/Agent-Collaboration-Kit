@@ -63,7 +63,17 @@ HARD_CONSTRAINTS = [
     "--artifact",
 ]
 
-SCRIPTS = ["_journal.py", "append.py", "context.py", "end.py", "peek.py"]
+# 必须与模板逐字节一致的文件。标 optional 的只在装了那一方的项目里存在，缺失不算漂移。
+SYNCED_FILES = [
+    ("journal/bin/_journal.py", False),
+    ("journal/bin/append.py", False),
+    ("journal/bin/context.py", False),
+    ("journal/bin/end.py", False),
+    ("journal/bin/peek.py", False),
+    # TRAE 没有 hook，这份规则文件是它**唯一**的常驻上下文。漂移了它会照旧规矩干活，
+    # 而且不像 hook 那样会因为报错暴露——所以更需要机械比对。
+    (".trae/rules/project_rules.md", True),
+]
 HEADING = re.compile(r"(?m)^## \[(?P<agent>[^\]]+)\]\s*(?P<rest>.*)$")
 
 
@@ -87,18 +97,22 @@ def protocol_section(agents_md: Path) -> str:
 
 
 def check_implementation(repos: list) -> list:
-    lines = ["## 1. 实现漂移（journal/bin/*.py 是否与模板一致）", ""]
+    lines = ["## 1. 实现漂移（共用文件是否与模板一致）", ""]
     ok = True
-    for name in SCRIPTS:
-        ref = digest(TEMPLATE / "journal" / "bin" / name)
-        row = [f"- `{name}` 模板 `{ref}`"]
+    for rel, optional in SYNCED_FILES:
+        ref = digest(TEMPLATE / rel)
+        row = [f"- `{rel}` 模板 `{ref}`"]
         for repo in repos:
-            got = digest(repo / "journal" / "bin" / name)
+            path = repo / rel
+            if optional and not path.exists():
+                row.append(f"{repo.name} —未装")
+                continue
+            got = digest(path)
             mark = "✓" if got == ref else f"✗ {got}"
             row.append(f"{repo.name} {mark}")
             ok = ok and got == ref
         lines.append("｜".join(row))
-    lines += ["", "**结论：** " + ("三处一致。" if ok else "**存在漂移，必须修**——两侧共用一份实现是硬要求。"), ""]
+    lines += ["", "**结论：** " + ("已装的处处一致。" if ok else "**存在漂移，必须修**——各方共用一份实现是硬要求。"), ""]
     return lines
 
 

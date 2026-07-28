@@ -136,6 +136,7 @@
 - 目标仓库**必须至少有一个 commit**：协议里的 HEAD 比对和信封空转判定都依赖 HEAD 存在。
 - **TRAE SOLO 没有 lifecycle hook**（2026-07 实测：应用包里搜不到任何 hook 事件名，项目级无 hook 配置入口；同名的 trae-agent CLI 那边，lifecycle hooks 至今是 Open 状态的 feature request）。它日后支持了，`journal/README.md` 的读取规则表要回来改。
 - **TRAE 的项目级配置在 `<project>/.trae/`**（如 `mcp.json`），会话记忆的项目路径转写规则与 Claude 一致（非字母数字逐个换成 `-`），已实测验证命中。
+- **TRAE 的规则文件路径是 `.trae/rules/project_rules.md`**（2026-07 实测：同时装 `.trae/project_rules.md` 做对照，只有前者被加载）。实测方式是在两份文件里放不同标记、开新会话看哪个标记出现——这是产品行为不是标准，换版本要重测。同一次实测里 TRAE 还自发执行了规则第 1 条（跑 `context.py --manual`）和协议的 HEAD 比对，说明规则文件确实作为常驻上下文生效，不只是「文件被读到」。
 
 ## 规范的执行力分三档
 

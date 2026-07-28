@@ -102,7 +102,7 @@ template/
 - macOS，`/usr/bin/python3`（系统自带 3.9 即可，无第三方依赖）
 - 目标仓库是 git 仓库，**且至少有一个 commit**（HEAD 不存在时协议里的并发检查全部失效）
 - Codex 侧需要你在界面上批准一次项目 hook——安全控制，Agent 不能代劳，也不该代劳
-- TRAE 侧无需批准任何东西，但**规则文件的加载路径需要实测确认**（`SETUP-TRAE.md` 第 3 节带了验证流程）
+- TRAE 侧无需批准任何东西；规则文件放 `.trae/rules/project_rules.md`（2026-07 实测生效，换版本需重测，流程见 `SETUP-TRAE.md` 第 3 节）
 
 ## 一句话原理
 
