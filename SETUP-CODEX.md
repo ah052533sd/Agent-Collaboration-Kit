@@ -97,7 +97,7 @@ echo '{"hook_event_name":"UserPromptSubmit","session_id":"verify"}' | /usr/bin/p
   | /usr/bin/python3 -c "import json,sys; print(len(json.load(sys.stdin)['hookSpecificOutput']['additionalContext']), '字符')"
 ```
 
-期望：约 280–370 字符（提醒里含仓库绝对路径，路径长则偏多）。
+期望：约 310–400 字符（提醒里含仓库绝对路径，路径长则偏多；实测两个仓库为 326 与 340）。
 **不要用 `wc -c` 量**——那数的是整段 JSON 的字节数，中文一字三字节，量出来的不是注入长度。
 
 ### V2b 会话中途追赶（长会话不必重开也能收到对方的新条目）

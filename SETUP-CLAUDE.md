@@ -81,7 +81,7 @@ echo '{"hook_event_name":"UserPromptSubmit","session_id":"verify"}' | /usr/bin/p
   | /usr/bin/python3 -c "import json,sys; print(len(json.load(sys.stdin)['hookSpecificOutput']['additionalContext']), '字符')"
 ```
 
-期望：约 280–370 字符（提醒里含仓库绝对路径，路径长则偏多）。这条每轮都注入，长了就是持续成本。
+期望：约 310–400 字符（提醒里含仓库绝对路径，路径长则偏多；实测两个仓库为 326 与 340）。这条每轮都注入，长了就是持续成本。
 **不要用 `wc -c` 量**——那数的是整段 JSON 的字节数，中文一字三字节，量出来的不是注入长度。
 
 ### V2b 会话中途追赶（长会话不必重开也能收到对方的新条目）
@@ -156,7 +156,8 @@ hook 在会话**启动时**加载，所以**本次会话装的 hook 对本次会
      --title "装好协作层，等待 Codex 侧信任审批" \
      --doing "安装 Claude ↔ Codex 协作机制" \
      --judgment "<你实际做的判断，例如知识层门槛选了哪档、任务目录定在哪>" \
-     --open "Codex 侧需用户批准 .codex/hooks.json 后验证"
+     --open "Codex 侧需用户批准 .codex/hooks.json 后验证" \
+     --artifact "AGENTS.md" --artifact "journal/README.md"
    ```
 2. 请用户在同一仓库开一次 Codex，按 `SETUP-CODEX.md` 执行。
 3. Codex 那侧应当在会话开头看到你这条，并回写一条它自己的。
