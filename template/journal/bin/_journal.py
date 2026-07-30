@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import re
@@ -396,12 +397,74 @@ def unread_since_watermark(agent: str, session_id: str) -> list:
     ]
 
 
+def nonjournal_status_digest() -> str:
+    """工作区状态指纹：`git status --porcelain` 里除 `journal/` 外的行的稳定摘要。
+
+    空转判定要比的是「本次会话改了什么」，不是「工作区脏不脏」——实际使用模式是
+    产物长期不 commit（push 等用户指令），工作区常年带着几十项未提交改动，「脏 =
+    干过活」在这种模式下恒为真：2026-07-30 实测一个连 transcript 都没有的空会话
+    照样写了信封。排除 `journal/` 与 end.py 的 dirty_signal 同理：对方追加条目
+    不算本方干活。`.journal-state/` 正常情况下被 gitignore，但指纹不赌这件事——
+    哪个项目漏配了那一行，SessionStart 写的状态文件就会让每个会话都被判成「干过活」。"""
+    lines = sorted(
+        line for line in git_raw("status", "--porcelain").splitlines()
+        if line.strip() and not line[3:].startswith(("journal/", ".journal-state/"))
+    )
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()[:12]
+
+
 def record_start_head(agent: str, session_id: str) -> None:
+    """记录会话起点：第一行 HEAD、第二行工作区状态指纹。
+
+    **已存在时不覆盖**：compact / resume / clear 都会再次触发 SessionStart，
+    覆盖会把基线刷新到触发时刻，会话早期的改动就从「变化」里消失了。"""
     if not session_id:
         return
     path = state_file(agent, session_id)
+    if path.exists():
+        return
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(head_short(), encoding="utf-8")
+        path.write_text(
+            "{}\n{}".format(head_short(), nonjournal_status_digest()),
+            encoding="utf-8",
+        )
     except OSError:
         pass
+
+
+def read_start_state(agent: str, session_id: str):
+    """读会话起点：(起始 HEAD, 起始状态指纹, 起始时间)。
+
+    旧格式状态文件（只有 HEAD 一行）的指纹返回空串——调用方退回「工作区是否脏」
+    的旧判据，正在进行的会话平滑过渡，不因格式升级误判。状态文件的 mtime 即会话
+    起始时间：`append.py` 漏传 --session-id 时空转判定的兜底判据。"""
+    state = state_file(agent, session_id)
+    try:
+        if not state.exists():
+            return "", "", None
+        lines = state.read_text(encoding="utf-8").splitlines()
+        since = datetime.fromtimestamp(state.stat().st_mtime).astimezone()
+    except OSError:
+        return "", "", None
+    head = lines[0].strip() if lines else ""
+    status = lines[1].strip() if len(lines) > 1 else ""
+    return head, status, since
+
+
+STALE_STATE_DAYS = 7
+
+
+def cleanup_stale_state(days: int = STALE_STATE_DAYS) -> None:
+    """清理超龄状态文件。SessionEnd 不保证触发（强关、断电时 harness 不跑 hook），
+    `.head` / `.seen` 会残留；单个只有几十字节，但没人清就只增不减。挂在
+    SessionStart 顺手做，不新增触发点。"""
+    if not STATE_DIR.is_dir():
+        return
+    cutoff = now().timestamp() - days * 86400
+    for path in STATE_DIR.rglob("*"):
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+        except OSError:
+            continue

@@ -4,8 +4,8 @@
 只追加一条**单行**会话信封：HEAD、未提交路径、原始记录位置。它的唯一作用是让另一
 Agent 能发现「这里发生过一个会话，原始记录在哪」。
 
-**空转会话不写信封**——HEAD 未变、工作区干净、且当天没有本方语义条目时直接退出，
-否则会堆出一串无内容条目，反过来挤占注入预算。
+**空转会话不写信封**——HEAD 未变、工作区相对会话起点无变化、且本次会话没写过语义
+条目时直接退出，否则会堆出一串无内容条目，反过来挤占注入预算。
 
 语义内容（关键判断、否决理由、未决项）由 Agent 在会话中用 `append.py` 自行追加，
 hook 代劳不了：SessionEnd 触发时会话已结束，取不到模型的总结。
@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import sys
-from datetime import datetime
 from pathlib import Path
 
 import _journal as J
@@ -68,8 +67,9 @@ def main() -> int:
     ]
     # journal/ 的改动不算「本次会话干过活」：可能是另一个 Agent 刚追加的条目，
     # 也可能是本方的语义条目——后者已由 session marker 精确覆盖。不排除的话，
-    # 对方一写 journal，本方所有空转会话都会跟着写信封。
-    dirty_signal = [p for p in dirty if not p.startswith("journal/")]
+    # 对方一写 journal，本方所有空转会话都会跟着写信封。.journal-state/ 同理：
+    # 它正常被 gitignore，但漏配时不该让状态文件自己触发信封。
+    dirty_signal = [p for p in dirty if not p.startswith(("journal/", ".journal-state/"))]
 
     stamp = J.now()
     day = stamp.strftime("%Y-%m-%d")
@@ -79,18 +79,20 @@ def main() -> int:
     except OSError:
         existing = ""
 
-    # --- 空转判定：三个条件都不满足就不写 ---
+    # --- 空转判定：三个信号都没有就不写 ---
     state = J.state_file(agent, session_id)
-    try:
-        start_head = state.read_text(encoding="utf-8").strip() if state.exists() else ""
-        # 状态文件的 mtime 即会话起始时间：调用方漏传 --session-id 时的兜底判据。
-        since = datetime.fromtimestamp(state.stat().st_mtime).astimezone() if state.exists() else None
-    except OSError:
-        start_head, since = "", None
+    start_head, start_status, since = J.read_start_state(agent, session_id)
     head_moved = bool(start_head) and start_head != head
+    if start_status:
+        # 主判据：工作区相对会话起点**有没有变化**，不是「脏不脏」。产物长期不
+        # commit 的使用模式下「脏」是常态、恒为真，空会话也会跟着写信封。
+        worked = start_status != J.nonjournal_status_digest()
+    else:
+        # 旧格式状态文件（只有 HEAD 行）或漏跑 SessionStart：退回旧判据，宁可多写。
+        worked = bool(dirty_signal)
     wrote_semantics = J.wrote_semantics_this_session(agent, session_id, existing, since)
 
-    if not (head_moved or dirty_signal or wrote_semantics):
+    if not (head_moved or worked or wrote_semantics):
         _cleanup(state)
         return 0
 

@@ -132,6 +132,7 @@
 
 - **Codex 侧的项目 hook 必须由用户在本机信任**（hash 记录在 `~/.codex/config.toml` 的 `[hooks.state]`）。未信任时 Codex 侧完全不触发，机制退回单边。改 `hooks.json` 一个字，信任就失效、要重批。
 - Codex `0.146.0-alpha.3.1` 实测会把 `SessionEnd` hook 的 timeout 上限压到 3 秒，配更大值无效。
+- **Claude Code 把超过约 10KB 的 hook 注入持久化成文件**，上下文只留约 2KB 预览 + 文件路径（2026-07-30 实测两例：12.3KB、19.2KB）。「全量注入」在积压大时静默退化为「预览 + 按需补读」——恰恰是最需要全量的时候。`context.py` 因此在注入超约 9000 字符时把「必须 Read 全文」的警示放进开头的预览窗口；预算本身要不要压进 10KB 内是决策问题，未动。
 - `~/.codex/sessions/` 是跨项目全局目录，`peek.py` 按每个 rollout 首行的 `session_meta.cwd` 过滤本项目——不这样做会把别的项目的会话一起读进来。
 - 目标仓库**必须至少有一个 commit**：协议里的 HEAD 比对和信封空转判定都依赖 HEAD 存在。
 - **TRAE SOLO 没有 lifecycle hook**（2026-07 实测：应用包里搜不到任何 hook 事件名，项目级无 hook 配置入口；同名的 trae-agent CLI 那边，lifecycle hooks 至今是 Open 状态的 feature request）。它日后支持了，`journal/README.md` 的读取规则表要回来改。

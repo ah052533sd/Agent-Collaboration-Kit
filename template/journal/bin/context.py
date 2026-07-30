@@ -2,7 +2,7 @@
 """SessionStart / UserPromptSubmit hook：协作流水的**读取侧**（有 hook 的各方共用）。
 
 SessionStart   注入「比自己上次语义条目更新」的条目，给出对方原始记录的位置，
-               并记录本会话起始 HEAD（供 SessionEnd 判断是否空转）。
+               并记录本会话起点（HEAD + 工作区状态指纹，供 SessionEnd 判断是否空转）。
 UserPromptSubmit 每轮注入一句极短提醒（约 300 字符），把 journal 义务留在上下文里。
 
 用法：
@@ -126,6 +126,20 @@ def render_obligation(agent: str, session_id: str, manual: bool = False) -> list
 
 MAX_MIDSESSION_CHARS = 2000
 
+# Claude Code 实测把超过约 10KB 的注入持久化成文件，上下文只留约 2KB 预览——未读
+# 积压越多、越需要全量的时候，被截得越狠（2026-07-30 实测 12.3KB / 19.2KB 两例）。
+# 压不进内联时，把「必须补读全文」的指令保证在预览窗口内。
+INLINE_PERSIST_WARN = 9000
+
+
+def persist_banner(total: int) -> list:
+    return [
+        "> ⚠️ 本注入约 {} 字符。若你读到的是 harness 持久化后的文件预览（约 2KB），"
+        "**开始任何工作前必须先 Read 该持久化文件的完整内容**——被截掉的未读条目"
+        "不会报错，直接读不到。".format(total),
+        "",
+    ]
+
 
 def render_reminder(agent: str, session_id: str) -> str:
     return (
@@ -177,9 +191,12 @@ def main() -> int:
     session_id = str(data.get("session_id", ""))
 
     if event == "SessionStart":
+        J.cleanup_stale_state()
         J.record_start_head(args.agent, session_id)
         blocks = render_unread(args.agent) + render_fallback(args.agent) + render_obligation(args.agent, session_id)
         context = "\n".join(blocks)
+        if len(context) > INLINE_PERSIST_WARN:
+            context = "\n".join(persist_banner(len(context)) + blocks)
         J.record_watermark(args.agent, session_id)
     elif event == "UserPromptSubmit":
         fresh = J.unread_since_watermark(args.agent, session_id)
