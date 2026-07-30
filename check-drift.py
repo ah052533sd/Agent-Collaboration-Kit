@@ -2,7 +2,8 @@
 """协作机制的漂移检查：把能机械判定的部分从人的眼睛里拿走。
 
 检查四件事：
-1. **实现漂移**——各仓库的 `journal/bin/*.py` 与工具包模板是否逐字节一致。
+1. **实现漂移**——各仓库的 `journal/bin/*.py` 与工具包模板是否逐字节一致，并检查
+   `.codex/hooks.json` 的 hook 定义是否一致（允许顶层 `description` 项目化）。
    两侧共用一份实现是硬要求；曾经各写一份，半天内漂移出四个 bug。
 2. **协议漂移**——各仓库 `AGENTS.md` 里的硬约束是否还在。只查「不得 / 禁止 / 必须」
    这类有约束力的句子，不比对措辞：项目特化的表述本来就该不同。
@@ -18,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sys
 from datetime import datetime, timedelta
@@ -84,6 +86,21 @@ def digest(path: Path) -> str:
         return "缺失"
 
 
+def hooks_digest(path: Path) -> str:
+    """只比较 hook 定义；顶层 description 允许写项目名。"""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return "缺失"
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return "JSON错误"
+    hooks = data.get("hooks") if isinstance(data, dict) else None
+    if not isinstance(hooks, dict):
+        return "hooks缺失"
+    canonical = json.dumps(hooks, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+
 def protocol_section(agents_md: Path) -> str:
     try:
         text = agents_md.read_text(encoding="utf-8")
@@ -112,6 +129,14 @@ def check_implementation(repos: list) -> list:
             row.append(f"{repo.name} {mark}")
             ok = ok and got == ref
         lines.append("｜".join(row))
+    ref = hooks_digest(TEMPLATE / ".codex/hooks.json")
+    row = [f"- `.codex/hooks.json` hook 定义模板 `{ref}`"]
+    for repo in repos:
+        got = hooks_digest(repo / ".codex/hooks.json")
+        mark = "✓" if got == ref else f"✗ {got}"
+        row.append(f"{repo.name} {mark}")
+        ok = ok and got == ref
+    lines.append("｜".join(row))
     lines += ["", "**结论：** " + ("已装的处处一致。" if ok else "**存在漂移，必须修**——各方共用一份实现是硬要求。"), ""]
     return lines
 

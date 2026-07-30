@@ -36,7 +36,7 @@ SETUP-CODEX.md         丢给 Codex 执行（含信任审批 + 验证流程）
 SETUP-TRAE.md          丢给 TRAE 执行（无 hook，含规则文件路径实测）
 DESIGN-NOTES.md        为什么长成这样：关键取舍、被否决的方案、实测数据
 AGENTS.md / CLAUDE.md  维护本仓库时给 Agent 的规则（不是给你装的协议）
-check-drift.py         漂移检查：脚本一致性、硬约束、协议差异、流水健康度
+check-drift.py         漂移检查：脚本/Hook 一致性、硬约束、协议差异、流水健康度
 reviews/               每周复查报告（本地生成，不进版本控制）
 template/
   AGENTS.md            协作协议，各方共用的唯一真相源（两处需按项目填空）
@@ -76,7 +76,7 @@ template/
 
 **每周日上午自动复查**（Claude 本地定时任务 `agent-protocol-review`，只读、不改文件、不 commit）：
 
-1. 跑 `check-drift.py`——三处脚本是否逐字节一致、硬约束是否还在、协议节逐行差异、近 7 天流水的信封/语义比例
+1. 跑 `check-drift.py`——三处脚本与 Codex Hook 定义是否一致、硬约束是否还在、协议节逐行差异、近 7 天流水的信封/语义比例
 2. 读两个仓库近 7 天的 journal 和 git log，逐条问这 6 条规则：**拦住过错误吗 / 被违反过吗 / 被绕过了吗 / 变成噪音了吗**
 3. 产出 `reviews/<日期>.md`：删 / 改 / 补 / 下沉四类建议，每条带证据和影响面
 4. 你拍板后，改工具包模板，再同步到各项目
