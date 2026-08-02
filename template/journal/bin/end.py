@@ -88,8 +88,12 @@ def main() -> int:
         # commit 的使用模式下「脏」是常态、恒为真，空会话也会跟着写信封。
         worked = start_status != J.nonjournal_status_digest()
     else:
-        # 旧格式状态文件（只有 HEAD 行）或漏跑 SessionStart：退回旧判据，宁可多写。
-        worked = bool(dirty_signal)
+        # 旧格式状态文件（只有 HEAD 行）或漏跑 SessionStart：没有起点快照就无法判断
+        # 工作区是否变化。产物长期不 commit 的使用模式下「脏」恒为真——2026-07-30
+        # 曾因此一分钟内写出 12 条重复信封——故此时不看工作区，只认 HEAD 移动或
+        # 本会话语义条目。代价是这类会话真干了活但没 commit 也没写语义条目时会漏
+        # 一条信封；信封本身无语义内容，漏写比重复噪音便宜。
+        worked = False
     wrote_semantics = J.wrote_semantics_this_session(agent, session_id, existing, since)
 
     if not (head_moved or worked or wrote_semantics):
